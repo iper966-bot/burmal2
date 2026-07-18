@@ -412,7 +412,7 @@
         <li>50 минут ушастых звонков</li>
         <li>Базовый доступ к чату «Друн FM»</li>
       </ul>
-      <a class="pay-btn" href="https://drun-uslugi.onrender.com" target="_blank" rel="noopener">Оплатить через Друн Услуги</a>
+      <button class="pay-btn" style="border:none;cursor:pointer" onclick="goBuyTariff('eco')">Оформить в кабинете</button>
     </div>
     <div class="plan">
       <span class="badge">хит</span>
@@ -423,7 +423,7 @@
         <li>Безлимит звонков внутри норы</li>
         <li>Полный доступ к чату «Друн FM»</li>
       </ul>
-      <a class="pay-btn" href="https://drun-uslugi.onrender.com" target="_blank" rel="noopener">Оплатить через Друн Услуги</a>
+      <button class="pay-btn" style="border:none;cursor:pointer" onclick="goBuyTariff('plus')">Оформить в кабинете</button>
     </div>
     <div class="plan">
       <span class="badge">максимум</span>
@@ -434,7 +434,7 @@
         <li>Личный неоновый ореол</li>
         <li>Приоритетная линия до Луны</li>
       </ul>
-      <a class="pay-btn" href="https://drun-uslugi.onrender.com" target="_blank" rel="noopener">Оплатить через Друн Услуги</a>
+      <button class="pay-btn" style="border:none;cursor:pointer" onclick="goBuyTariff('xxl')">Оформить в кабинете</button>
     </div>
   </div>
 
@@ -509,9 +509,9 @@
     <div class="cab-subview active" data-view="tariff">
       <p class="hint-small" style="margin-top:0">Выбери новый тариф — вступит в силу сразу</p>
       <div class="tariff-pick">
-        <label><span><input type="radio" name="tariff" value="Бурмалда Эко"> Бурмалда Эко</span><span class="t-price">20 чекушек/мес</span></label>
-        <label><span><input type="radio" name="tariff" value="Бурмалда +"> Бурмалда +</span><span class="t-price">60 чекушек/мес</span></label>
-        <label><span><input type="radio" name="tariff" value="Бурмалдаец XXL"> Бурмалдаец XXL</span><span class="t-price">150 чекушек/мес</span></label>
+        <label><span><input type="radio" name="tariff" value="Бурмалда Эко" data-key="eco"> Бурмалда Эко</span><span class="t-price">20 чекушек/мес</span></label>
+        <label><span><input type="radio" name="tariff" value="Бурмалда +" data-key="plus"> Бурмалда +</span><span class="t-price">60 чекушек/мес</span></label>
+        <label><span><input type="radio" name="tariff" value="Бурмалдаец XXL" data-key="xxl"> Бурмалдаец XXL</span><span class="t-price">150 чекушек/мес</span></label>
       </div>
       <button class="cab-btn" onclick="cabChangeTariff()">Сменить тариф</button>
       <div class="cab-success" id="tariff-success"></div>
@@ -557,7 +557,11 @@ function authHeaders(){
 function cabShow(id){
   document.getElementById('cab-login').style.display = id === 'login' ? 'block' : 'none';
   document.getElementById('cab-cabinet').style.display = id === 'cabinet' ? 'block' : 'none';
-  document.getElementById('cab-login').scrollIntoView({behavior:'smooth'});
+  if (id === 'login'){
+    setLoginError(null);
+  }
+  const target = id === 'login' ? document.getElementById('cab-login') : document.getElementById('cab-cabinet');
+  target.scrollIntoView({behavior:'smooth'});
 }
 
 function updateCabNav(loggedIn){
@@ -575,7 +579,9 @@ function setLoginError(msg){
 async function cabLogin(){
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
-  const code = document.getElementById('login-2fa').value.trim();
+  const twofaBox = document.getElementById('twofa-box');
+  const codeInput = document.getElementById('login-2fa');
+  const code = codeInput.value.trim();
   const btn = document.getElementById('login-btn');
   setLoginError(null);
 
@@ -589,20 +595,34 @@ async function cabLogin(){
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(code ? {username, password, code} : {username, password})
     });
-    const data = await res.json();
+    let data = {};
+    try { data = await res.json(); } catch(parseErr) { data = {}; }
+
     if (!res.ok){
       if (data.twofa_required){
-        document.getElementById('twofa-box').style.display = 'block';
-        setLoginError(data.error || 'Введите код 2FA');
+        twofaBox.style.display = 'block';
+        // Если код уже был введён и всё равно потребовался — значит он неверный
+        setLoginError(code ? (data.error || 'Неверный код 2FA') : (data.error || 'Введите код 2FA'));
       } else {
+        // Логин/пароль неверны — не оставляем зависшее поле 2FA от предыдущей попытки
+        twofaBox.style.display = 'none';
+        codeInput.value = '';
         setLoginError(data.error || 'Ошибка входа');
       }
       return;
     }
+
+    if (!data.token || !data.user){
+      setLoginError('Сервер Друн мессенджера вернул неожиданный ответ');
+      return;
+    }
+
     localStorage.setItem(TOKEN_KEY, data.token);
     renderCab(data.user);
     updateCabNav(true);
     cabShow('cabinet');
+    codeInput.value = '';
+    twofaBox.style.display = 'none';
   } catch(e){
     setLoginError('Не удалось связаться с сервером Друн мессенджера');
   } finally {
@@ -613,13 +633,31 @@ async function cabLogin(){
 
 function cabLogout(){
   localStorage.removeItem(TOKEN_KEY);
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-2fa').value = '';
+  document.getElementById('twofa-box').style.display = 'none';
   updateCabNav(false);
   cabShow('login');
 }
 
 function renderCab(user){
+  if (!user){ return; }
   document.getElementById('cab-balance').textContent = Number(user.balance ?? 0).toLocaleString('ru-RU') + ' чекушек';
-  document.getElementById('cab-username').textContent = '@' + user.username;
+  document.getElementById('cab-username').textContent = '@' + (user.username ?? '—');
+}
+
+function goBuyTariff(planKey){
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token){
+    cabShow('login');
+    setLoginError('Войдите, чтобы оформить тариф');
+    return;
+  }
+  cabShow('cabinet');
+  cabTab('tariff');
+  const radio = document.querySelector('input[name="tariff"][data-key="' + planKey + '"]');
+  if (radio) radio.checked = true;
 }
 
 function cabTab(name){
@@ -627,16 +665,56 @@ function cabTab(name){
   document.querySelectorAll('.cab-subview').forEach(v => v.classList.toggle('active', v.dataset.view === name));
 }
 
-function cabChangeTariff(){
+async function cabChangeTariff(){
   const picked = document.querySelector('input[name="tariff"]:checked');
   const box = document.getElementById('tariff-success');
+  const btn = document.querySelector('#cab-cabinet .cab-subview[data-view="tariff"] .cab-btn');
+
   if (!picked){
     box.style.display='block'; box.style.borderColor='rgba(255,80,80,0.4)'; box.style.color='#ffb3b3';
     box.textContent = 'Выбери тариф';
     return;
   }
-  box.style.display='block'; box.style.color='#c6ffd9';
-  box.textContent = 'Тариф изменён на «' + picked.value + '». Изменения вступят в силу с начала следующего расчётного периода.';
+
+  const tariffName = picked.value;
+  const planKey = picked.dataset.key;
+
+  box.style.display='block'; box.style.color='var(--white)'; box.style.borderColor='rgba(255,255,255,0.15)';
+  box.textContent = 'Списываем чекушки...';
+  if (btn){ btn.disabled = true; }
+
+  try {
+    const res = await fetch(API_BASE + '/api/services/burmal2/' + planKey + '/issue', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    if (res.status === 401){
+      box.style.color='#ffb3b3'; box.style.borderColor='rgba(255,80,80,0.4)';
+      box.textContent = 'Сессия истекла, войдите снова';
+      cabLogout();
+      return;
+    }
+
+    let data = {};
+    try { data = await res.json(); } catch(parseErr) { data = {}; }
+
+    if (!res.ok){
+      box.style.color='#ffb3b3'; box.style.borderColor='rgba(255,80,80,0.4)';
+      box.textContent = data.error || 'Не удалось сменить тариф';
+      return;
+    }
+
+    if (data.user) renderCab(data.user);
+    box.style.color='#c6ffd9'; box.style.borderColor='rgba(139,255,170,0.4)';
+    box.textContent = 'Тариф изменён на «' + tariffName + '». Списано ' + (data.subscription ? data.subscription.cost.toLocaleString('ru-RU') : '') + ' чекушек.';
+  } catch(e){
+    box.style.color='#ffb3b3'; box.style.borderColor='rgba(255,80,80,0.4)';
+    box.textContent = 'Не удалось связаться с сервером';
+  } finally {
+    if (btn){ btn.disabled = false; }
+  }
 }
 
 function generateBurmalNumber(){
@@ -673,7 +751,9 @@ function cabPort(kind){
   try {
     const res = await fetch(API_BASE + '/api/me', { headers: authHeaders() });
     if (!res.ok){ localStorage.removeItem(TOKEN_KEY); updateCabNav(false); return; }
-    const data = await res.json();
+    let data = {};
+    try { data = await res.json(); } catch(parseErr) { localStorage.removeItem(TOKEN_KEY); updateCabNav(false); return; }
+    if (!data.user){ localStorage.removeItem(TOKEN_KEY); updateCabNav(false); return; }
     updateCabNav(true);
     renderCab(data.user);
   } catch(e){
