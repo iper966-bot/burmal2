@@ -320,6 +320,8 @@
   }
   .balance-row .label{opacity:0.7;font-size:0.85rem;}
   .balance-row .value{font-size:1.8rem;font-weight:bold;color:var(--pink);}
+  #cab-tariff-row{margin-top:-8px;}
+  #cab-tariff-row .value.none{color:rgba(245,234,255,0.5);font-size:1.1rem;font-weight:normal;font-style:italic;}
   .cab-tabs{
     display:flex;
     gap:8px;
@@ -447,17 +449,17 @@
   <div class="gallery">
 
     <div class="burmaldaets">
-      <img src="burmaldaets.png" alt="Бурмалдаец" style="width:100%;height:auto;border-radius:12px;filter: drop-shadow(0 0 10px rgba(139,61,255,0.6));">
+      <img src="burm_eco.png" alt="Пушистик" style="width:100%;height:auto;border-radius:12px;filter: drop-shadow(0 0 10px rgba(139,61,255,0.6));">
       <p>Пушистик — талисман тарифа «Эко»</p>
     </div>
 
     <div class="burmaldaets">
-      <img src="burmaldaets.png" alt="Бурмалдаец" style="width:100%;height:auto;border-radius:12px;filter: drop-shadow(0 0 10px rgba(139,61,255,0.6));">
+      <img src="burm_plus.png" alt="Мега-Ухо" style="width:100%;height:auto;border-radius:12px;filter: drop-shadow(0 0 10px rgba(139,61,255,0.6));">
       <p>Мега-Ухо — талисман тарифа «+»</p>
     </div>
 
     <div class="burmaldaets">
-      <img src="burmaldaets.png" alt="Бурмалдаец" style="width:100%;height:auto;border-radius:12px;filter: drop-shadow(0 0 10px rgba(139,61,255,0.6));">
+      <img src="burm_xxl.png" alt="Бурмалдаец XXL" style="width:100%;height:auto;border-radius:12px;filter: drop-shadow(0 0 10px rgba(139,61,255,0.6));">
       <p>Бурмалдаец XXL — легендарный талисман</p>
     </div>
 
@@ -496,6 +498,17 @@
       <div style="text-align:right">
         <div class="label">Абонент</div>
         <div id="cab-username" style="font-weight:bold">—</div>
+      </div>
+    </div>
+
+    <div class="balance-row" id="cab-tariff-row">
+      <div>
+        <div class="label">Текущий тариф</div>
+        <div class="value" id="cab-tariff-name" style="font-size:1.3rem">—</div>
+      </div>
+      <div style="text-align:right">
+        <div class="label">Списание</div>
+        <div id="cab-tariff-cost" style="font-weight:bold">—</div>
       </div>
     </div>
 
@@ -623,6 +636,7 @@ async function cabLogin(){
     cabShow('cabinet');
     codeInput.value = '';
     twofaBox.style.display = 'none';
+    loadTariffStatus();
   } catch(e){
     setLoginError('Не удалось связаться с сервером Друн мессенджера');
   } finally {
@@ -639,12 +653,59 @@ function cabLogout(){
   document.getElementById('twofa-box').style.display = 'none';
   updateCabNav(false);
   cabShow('login');
+  resetCabState();
+}
+
+// Сбрасывает всё, что относится к конкретному аккаунту, — вызывается при
+// выходе, чтобы после логина другого пользователя в кабинете не мелькали
+// баланс, тариф или выбранная радио-кнопка от предыдущей сессии.
+function resetCabState(){
+  document.getElementById('cab-balance').textContent = '—';
+  document.getElementById('cab-username').textContent = '—';
+  document.getElementById('cab-tariff-name').textContent = '—';
+  document.getElementById('cab-tariff-name').classList.remove('none');
+  document.getElementById('cab-tariff-cost').textContent = '';
+  document.querySelectorAll('input[name="tariff"]').forEach(r => { r.checked = false; });
+  document.querySelectorAll('.cab-success').forEach(box => { box.style.display = 'none'; box.textContent = ''; box.innerHTML = ''; });
+  document.querySelectorAll('.field-box input').forEach(inp => { if (inp.id && inp.id.endsWith('-old')) inp.value = ''; });
 }
 
 function renderCab(user){
   if (!user){ return; }
   document.getElementById('cab-balance').textContent = Number(user.balance ?? 0).toLocaleString('ru-RU') + ' чекушек';
   document.getElementById('cab-username').textContent = '@' + (user.username ?? '—');
+}
+
+async function loadTariffStatus(){
+  const nameEl = document.getElementById('cab-tariff-name');
+  const costEl = document.getElementById('cab-tariff-cost');
+  nameEl.textContent = '…';
+  nameEl.classList.remove('none');
+  costEl.textContent = '';
+  try {
+    const res = await fetch(API_BASE + '/api/services/burmal2/status', { headers: authHeaders() });
+    if (!res.ok){
+      nameEl.textContent = '—';
+      costEl.textContent = '';
+      return;
+    }
+    let data = {};
+    try { data = await res.json(); } catch(parseErr) { data = {}; }
+    if (!data.active){
+      nameEl.textContent = 'Тариф не подключён';
+      nameEl.classList.add('none');
+      costEl.textContent = '';
+      return;
+    }
+    nameEl.textContent = data.title || data.plan_key;
+    costEl.textContent = (data.cost != null ? data.cost.toLocaleString('ru-RU') + ' чекушек/мес' : '');
+    // Отмечаем текущий тариф выбранным в форме смены — удобно видеть, что уже активно.
+    const radio = document.querySelector('input[name="tariff"][data-key="' + data.plan_key + '"]');
+    if (radio) radio.checked = true;
+  } catch(e){
+    nameEl.textContent = '—';
+    costEl.textContent = '';
+  }
 }
 
 function goBuyTariff(planKey){
@@ -656,13 +717,18 @@ function goBuyTariff(planKey){
   }
   cabShow('cabinet');
   cabTab('tariff');
-  const radio = document.querySelector('input[name="tariff"][data-key="' + planKey + '"]');
-  if (radio) radio.checked = true;
+  loadTariffStatus().then(() => {
+    const radio = document.querySelector('input[name="tariff"][data-key="' + planKey + '"]');
+    if (radio) radio.checked = true;
+  });
 }
 
 function cabTab(name){
   document.querySelectorAll('.cab-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.cab-subview').forEach(v => v.classList.toggle('active', v.dataset.view === name));
+  // Прячем success/error-плашки от прошлых действий на других вкладках —
+  // иначе результат смены тарифа виден потом на вкладке переноса номера и наоборот.
+  document.querySelectorAll('.cab-success').forEach(box => { box.style.display = 'none'; box.textContent = ''; box.innerHTML = ''; });
 }
 
 async function cabChangeTariff(){
@@ -709,6 +775,7 @@ async function cabChangeTariff(){
     if (data.user) renderCab(data.user);
     box.style.color='#c6ffd9'; box.style.borderColor='rgba(139,255,170,0.4)';
     box.textContent = 'Тариф изменён на «' + tariffName + '». Списано ' + (data.subscription ? data.subscription.cost.toLocaleString('ru-RU') : '') + ' чекушек.';
+    loadTariffStatus();
   } catch(e){
     box.style.color='#ffb3b3'; box.style.borderColor='rgba(255,80,80,0.4)';
     box.textContent = 'Не удалось связаться с сервером';
@@ -733,7 +800,13 @@ function cabPort(kind){
     box.textContent = 'Введите номер для переноса';
     return;
   }
-  if (kind === 'port-int' && !/^\+?(7|375)/.test(oldNumber.replace(/\s/g,''))){
+  const digitsOnly = oldNumber.replace(/[^\d+]/g,'');
+  if (digitsOnly.replace(/\D/g,'').length < 7){
+    box.style.display='block'; box.style.color='#ffb3b3';
+    box.textContent = 'Похоже, номер введён не полностью — проверьте и попробуйте снова';
+    return;
+  }
+  if (kind === 'port-int' && !/^\+?(7|375)/.test(digitsOnly)){
     box.style.display='block'; box.style.color='#ffb3b3';
     box.textContent = 'Для этого переноса нужен номер российского (+7) или белорусского (+375) оператора';
     return;
@@ -741,7 +814,15 @@ function cabPort(kind){
 
   const newNumber = generateBurmalNumber();
   box.style.display='block'; box.style.color='#c6ffd9';
-  box.innerHTML = 'Номер ' + oldNumber + ' успешно перенесён.<div class="number-preview">' + newNumber + '</div>';
+  box.innerHTML = 'Номер ' + escapeHtml(oldNumber) + ' успешно перенесён.<div class="number-preview">' + newNumber + '</div>';
+}
+
+// Экранирование пользовательского ввода перед вставкой через innerHTML —
+// без этого номер с символами вроде "<" мог сломать вёрстку или исполниться как HTML.
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 // Автовход при наличии токена
@@ -756,6 +837,7 @@ function cabPort(kind){
     if (!data.user){ localStorage.removeItem(TOKEN_KEY); updateCabNav(false); return; }
     updateCabNav(true);
     renderCab(data.user);
+    loadTariffStatus();
   } catch(e){
     updateCabNav(false);
   }
